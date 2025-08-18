@@ -32,23 +32,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	"github.com/soheilhy/cmux"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"go.uber.org/atomic"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/keepalive"
-	"google.golang.org/grpc/status"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/federpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
+	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver/mcp"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy"
@@ -72,12 +61,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/soheilhy/cmux"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/keepalive"
 )
 
 var (
-	errMissingMetadata = status.Errorf(codes.InvalidArgument, "missing metadata")
-	errInvalidToken    = status.Errorf(codes.Unauthenticated, "invalid token")
-	// registerHTTPHandlerOnce avoid register http handler multiple times
 	registerHTTPHandlerOnce sync.Once
 	// only for test
 	enableCustomInterceptor = true
@@ -192,6 +187,9 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
 	appV2 := ginHandler.Group("/v2/vectordb")
 	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
+	appMcp := ginHandler.Group("/mcp")
+	mcp.NewMcpServer(s.proxy).RegisterRoutes(appMcp)
+
 	s.httpServer = &http.Server{Handler: ginHandler, ReadHeaderTimeout: time.Second}
 	errChan <- nil
 	if err := s.httpServer.Serve(s.listenerManager.HTTPListener()); err != nil && err != cmux.ErrServerClosed {
